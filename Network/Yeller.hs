@@ -62,6 +62,7 @@ data YellerClient = YellerClient {
     clientHost :: T.Text
   , clientEnvironment :: T.Text
   , clientVersion :: T.Text
+  , clientApplicationPackage :: T.Text
 } deriving (Show, Eq)
 
 class ToError a where
@@ -100,12 +101,19 @@ manageNoLocationFilename t
 parseStackTrace :: [String] -> [StackFrame]
 parseStackTrace = filter ((/= "Network.Yeller.sendError") . stackFunction) . map parseStackLine
 
+markInApp :: T.Text -> StackFrame -> StackFrame
+markInApp package frame
+  | T.isPrefixOf package (stackFunction frame) = frame { stackOptions = StackOptions {stackOptionsInApp = True } }
+  | otherwise = frame { stackOptions = StackOptions {stackOptionsInApp = False } }
+
+filterInAppLines :: T.Text -> [StackFrame] -> [StackFrame]
+filterInAppLines package = map (markInApp package)
+
 sendError :: ToError e => YellerClient -> e -> ExtraErrorInfo -> IO ()
 sendError c e extra = do
   let forced = seq e e
   stack <- GHC.Stack.whoCreated forced
-  print stack
-  sendNotification c $ toError e extra c (parseStackTrace stack)
+  sendNotification c $ toError e extra c (filterInAppLines (clientApplicationPackage c) $ parseStackTrace stack)
 
 sendNotification :: YellerClient -> ErrorNotification -> IO ()
 sendNotification c n = do
@@ -127,12 +135,14 @@ makeRequest _ n = do
   return req
 
 newtype ApplicationEnvironment = ApplicationEnvironment T.Text
+newtype ApplicationPackage = ApplicationPackage T.Text
 
-client :: ApplicationEnvironment -> IO YellerClient
-client (ApplicationEnvironment env) = do
+client :: ApplicationEnvironment -> ApplicationPackage -> IO YellerClient
+client (ApplicationEnvironment env) (ApplicationPackage package) = do
   h <- fmap T.pack Network.BSD.getHostName
   return YellerClient {
       clientHost = h
       , clientEnvironment = env
       , clientVersion = yellerVersion
+      , clientApplicationPackage = package
     }
