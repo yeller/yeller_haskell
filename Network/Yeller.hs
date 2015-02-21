@@ -65,24 +65,47 @@ data YellerClient = YellerClient {
 } deriving (Show, Eq)
 
 class ToError a where
-  toError :: a -> ExtraErrorInfo -> YellerClient -> ErrorNotification
+  toError :: a -> ExtraErrorInfo -> YellerClient -> [StackFrame] -> ErrorNotification
 
 instance ToError Control.Exception.SomeException where
-  toError e extra c = ErrorNotification {
+  toError e extra c stack = ErrorNotification {
         errorType = T.pack . show $ Data.Typeable.typeOf e
       , errorMessage = T.pack $ show e
-      , errorStackTrace = parseStackTrace (GHC.Stack.whoCreated e)
+      , errorStackTrace = stack
       , errorHost = clientHost c
       , errorEnvironment = clientEnvironment c
       , errorClientVersion = clientVersion c
       , errorExtra = extra
     }
 
-parseStackTrace :: a -> [StackFrame]
-parseStackTrace _ = []
+parseStackLine :: String -> StackFrame
+parseStackLine x = StackFrame {
+    stackFilename = filename
+  , stackLineNumber = line
+  , stackFunction = function
+  , stackOptions = StackOptions { stackOptionsInApp = True }
+  }
+  where encoded = T.pack x
+        function = T.takeWhile (/= ' ') encoded
+        afterFunction = T.tail $ T.dropWhile (/= ' ') encoded
+        filename = manageNoLocationFilename $ T.dropWhile (== '(') $ T.takeWhile (/= ':') afterFunction
+        afterFilename = T.dropWhile (== ':') $ T.dropWhile (/= ':') afterFunction
+        line = T.take (T.length afterFilename - 1) afterFilename
+
+manageNoLocationFilename :: T.Text -> T.Text
+manageNoLocationFilename t
+  | t == "<no location info>)" = ""
+  | otherwise = t
+
+parseStackTrace :: [String] -> [StackFrame]
+parseStackTrace = map parseStackLine
 
 sendError :: ToError e => YellerClient -> e -> ExtraErrorInfo -> IO ()
-sendError c e extra = sendNotification c $ toError e extra c
+sendError c e extra = do
+  let forced = seq e e
+  stack <- GHC.Stack.whoCreated forced
+  print stack
+  sendNotification c $ toError e extra c (parseStackTrace stack)
 
 sendNotification :: YellerClient -> ErrorNotification -> IO ()
 sendNotification c n = do
@@ -93,7 +116,7 @@ sendNotification c n = do
 
 makeRequest :: YellerClient -> ErrorNotification -> IO HTTP.Request
 makeRequest _ n = do
-  initReq <- HTTP.parseUrl "https://collector1.yellerapp.com/API_KEY_HERE"
+  initReq <- HTTP.parseUrl "https://collector1.yellerapp.com/ERROR"
   let req = initReq {
       HTTP.method = "POST"
     , HTTP.secure = True
@@ -113,8 +136,3 @@ client (ApplicationEnvironment env) = do
       , clientEnvironment = env
       , clientVersion = yellerVersion
     }
-
-main :: IO ()
-main = do
-  c <- client (ApplicationEnvironment "production")
-  sendError c (Control.Exception.SomeException Control.Exception.DivideByZero) (ExtraErrorInfo Nothing Nothing Nothing)

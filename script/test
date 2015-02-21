@@ -1,3 +1,8 @@
 #!/bin/bash
 
-echo ":main" | cabal repl
+set -e
+
+#cabal build
+#cabal configure --enable-executable-profiling --enable-library-profiling
+#dist/build/yeller/yeller
+echo ":main" | cabal repl Specs.hs
