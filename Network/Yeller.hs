@@ -75,13 +75,37 @@ data YellerClient = YellerClient {
   , clientBackends :: STM.TVar [Backend]
 } | DisabledYellerClient
 
+data ApplicationEnvironment = TestEnvironment | ApplicationEnvironment T.Text
+newtype ApplicationPackage = ApplicationPackage T.Text
+newtype YellerToken = YellerToken T.Text
+
+data YellerClientSettings = YellerClientSettings {
+    clientSettingsToken :: YellerToken
+  , clientSettingsHost :: Maybe T.Text
+  , clientSettingsEnvironment :: ApplicationEnvironment
+  , clientSettingsApplicationPackage :: ApplicationPackage
+  , clientSettingsBackends :: [Backend]
+}
+
+defaultClientSettings :: YellerClientSettings
+defaultClientSettings = YellerClientSettings {
+    clientSettingsToken = YellerToken bogusClientToken
+  , clientSettingsHost = Nothing
+  , clientSettingsEnvironment = ApplicationEnvironment "production"
+  , clientSettingsApplicationPackage = ApplicationPackage ""
+  , clientSettingsBackends = map Backend defaultBackends
+}
+
+bogusClientToken :: T.Text
+bogusClientToken = "YOUR_API_TOKEN_HERE"
+
 defaultBackends :: [T.Text]
 defaultBackends = [
-    "https://collector1.yellerapp.com"
-  , "https://collector2.yellerapp.com"
-  , "https://collector3.yellerapp.com"
-  , "https://collector4.yellerapp.com"
-  , "https://collector5.yellerapp.com"
+    "https://collector1.yellerapp.com/"
+  , "https://collector2.yellerapp.com/"
+  , "https://collector3.yellerapp.com/"
+  , "https://collector4.yellerapp.com/"
+  , "https://collector5.yellerapp.com/"
   ]
 
 class ToError a where
@@ -175,13 +199,9 @@ makeRequest c (Backend b) n = do
   }
   return req
 
-data ApplicationEnvironment = TestEnvironment | ApplicationEnvironment T.Text
-newtype ApplicationPackage = ApplicationPackage T.Text
-newtype YellerToken = YellerToken T.Text
-
-client :: ApplicationEnvironment -> ApplicationPackage -> YellerToken -> IO YellerClient
-client TestEnvironment _ _ = return DisabledYellerClient
-client (ApplicationEnvironment env) (ApplicationPackage package) (YellerToken token) = do
+client :: YellerClientSettings -> IO YellerClient
+client (YellerClientSettings {clientSettingsEnvironment=TestEnvironment}) = return DisabledYellerClient
+client (YellerClientSettings {clientSettingsEnvironment=(ApplicationEnvironment env), clientSettingsApplicationPackage=(ApplicationPackage package), clientSettingsToken=(YellerToken token)}) = do
   h <- fmap T.pack Network.BSD.getHostName
   m <- HTTP.newManager TLS.tlsManagerSettings
   backends <- STM.newTVarIO (map Backend defaultBackends)
