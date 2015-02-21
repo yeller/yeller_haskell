@@ -23,6 +23,8 @@ library
   build-depends:
           base == 4.*
         , text ==0.11.*
+        , bytestring == 0.10.*
+        , stm == 2.*
         , containers == 0.5.*
         , aeson == 0.6.*
         , network == 2.*
@@ -39,6 +41,8 @@ executable yeller
   build-depends:
           base == 4.*
         , text ==0.11.*
+        , bytestring == 0.10.*
+        , stm == 2.*
         , containers == 0.5.*
         , aeson == 0.6.*
         , network == 2.*
@@ -54,6 +58,8 @@ Test-Suite test-yeller
           base == 4.*
         , hspec == 2.1.2
         , text ==0.11.*
+        , bytestring == 0.10.*
+        , stm == 2.*
         , containers == 0.5.*
         , aeson == 0.6.*
         , network == 2.*

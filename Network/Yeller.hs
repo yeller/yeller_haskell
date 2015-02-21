@@ -1,7 +1,9 @@
-{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE OverloadedStrings, ScopedTypeVariables #-}
 module Network.Yeller where
 import qualified Data.Map as M
 import qualified Data.Text as T
+import qualified Data.Text.Encoding as TE
+import qualified Data.ByteString.Lazy as LBS
 import qualified GHC.Stack
 import qualified Control.Exception
 import qualified Data.Typeable
@@ -9,15 +11,18 @@ import qualified Data.Aeson as JSON
 import qualified Network.BSD
 import qualified Network.HTTP.Client as HTTP
 import qualified Network.HTTP.Client.TLS as TLS
+import qualified Control.Concurrent.STM as STM
+import Control.Applicative((<$>))
+import Data.Monoid((<>))
 
-data ErrorNotification = ErrorNotification {
+data ErrorNotification a = ErrorNotification {
     errorType :: T.Text
   , errorMessage :: T.Text
   , errorStackTrace :: [StackFrame]
   , errorHost :: T.Text
   , errorEnvironment :: T.Text
   , errorClientVersion :: T.Text
-  , errorExtra :: ExtraErrorInfo
+  , errorExtra :: ExtraErrorInfo a
 } deriving (Show, Eq)
 
 data StackFrame = StackFrame {
@@ -31,9 +36,9 @@ data StackOptions = StackOptions {
   stackOptionsInApp :: Bool
 } deriving (Show, Eq)
 
-data ExtraErrorInfo = ExtraErrorInfo {
+data ExtraErrorInfo a = ExtraErrorInfo {
     errorURL :: Maybe T.Text
-  , errorCustomData :: Maybe (M.Map T.Text JSON.Value)
+  , errorCustomData :: Maybe (M.Map T.Text a)
   , errorLocation :: Maybe T.Text
 } deriving (Show, Eq)
 
@@ -43,7 +48,7 @@ instance JSON.ToJSON StackOptions where
 instance JSON.ToJSON StackFrame where
   toJSON s = JSON.toJSON (stackFilename s, stackLineNumber s, stackFunction s, stackOptions s)
 
-instance JSON.ToJSON ErrorNotification where
+instance (JSON.ToJSON b) => JSON.ToJSON (ErrorNotification b) where
   toJSON e = JSON.object ["type" JSON..= errorType e
                           , "message" JSON..= errorMessage e
                           , "stacktrace" JSON..= errorStackTrace e
@@ -58,15 +63,29 @@ instance JSON.ToJSON ErrorNotification where
 yellerVersion :: T.Text
 yellerVersion = T.pack "yeller-haskell: 0.0.1"
 
+data Backend = Backend T.Text
+
 data YellerClient = YellerClient {
-    clientHost :: T.Text
+    clientToken :: T.Text
+  , clientHost :: T.Text
   , clientEnvironment :: T.Text
   , clientVersion :: T.Text
   , clientApplicationPackage :: T.Text
-} deriving (Show, Eq)
+  , clientManager :: HTTP.Manager
+  , clientBackends :: STM.TVar [Backend]
+} | DisabledYellerClient
+
+defaultBackends :: [T.Text]
+defaultBackends = [
+    "https://collector1.yellerapp.com"
+  , "https://collector2.yellerapp.com"
+  , "https://collector3.yellerapp.com"
+  , "https://collector4.yellerapp.com"
+  , "https://collector5.yellerapp.com"
+  ]
 
 class ToError a where
-  toError :: a -> ExtraErrorInfo -> YellerClient -> [StackFrame] -> ErrorNotification
+  toError :: a -> ExtraErrorInfo b -> YellerClient -> [StackFrame] -> ErrorNotification b
 
 instance ToError Control.Exception.SomeException where
   toError e extra c stack = ErrorNotification {
@@ -109,40 +128,69 @@ markInApp package frame
 filterInAppLines :: T.Text -> [StackFrame] -> [StackFrame]
 filterInAppLines package = map (markInApp package)
 
-sendError :: ToError e => YellerClient -> e -> ExtraErrorInfo -> IO ()
+sendError :: (ToError e, JSON.ToJSON a) => YellerClient -> e -> ExtraErrorInfo a -> IO ()
+sendError DisabledYellerClient _ _ = return ()
 sendError c e extra = do
   let forced = seq e e
   stack <- GHC.Stack.whoCreated forced
   sendNotification c $ toError e extra c (filterInAppLines (clientApplicationPackage c) $ parseStackTrace stack)
 
-sendNotification :: YellerClient -> ErrorNotification -> IO ()
-sendNotification c n = do
-  r <- makeRequest c n
-  m <- HTTP.newManager TLS.tlsManagerSettings
-  _ <- HTTP.withResponse r m (\_  -> return ())
-  return ()
+sendNotification :: JSON.ToJSON a => YellerClient -> ErrorNotification a -> IO ()
+sendNotification c n = sendNotificationWithRetry 0 c (JSON.encode n)
 
-makeRequest :: YellerClient -> ErrorNotification -> IO HTTP.Request
-makeRequest _ n = do
-  initReq <- HTTP.parseUrl "https://collector1.yellerapp.com/ERROR"
+sendNotificationWithRetry :: Int -> YellerClient -> LBS.ByteString -> IO ()
+sendNotificationWithRetry currentRetryCount c encoded = do
+  currentBackend <- cycleBackends c
+  r <- makeRequest c currentBackend encoded
+  res <- Control.Exception.try $ HTTP.withResponse r (clientManager c) (\_  -> return ())
+  case res of
+    (Left (err :: Control.Exception.SomeException)) -> if currentRetryCount > 5 then
+                                                        sendNotificationWithRetry (currentRetryCount + 1) c encoded
+                                                        else
+                                                          print err
+    (Right _) -> return ()
+
+cycleBackends :: YellerClient -> IO Backend
+cycleBackends c = STM.atomically $ do
+  modifyTVar_ (clientBackends c) cycleBackends_
+  head <$> STM.readTVar (clientBackends c)
+
+cycleBackends_ :: [Backend] -> [Backend]
+cycleBackends_ (x:xs) = xs ++ [x]
+cycleBackends_ xs = xs
+
+modifyTVar_ :: STM.TVar a -> (a -> a) -> STM.STM ()
+modifyTVar_ tv f = STM.readTVar tv >>= STM.writeTVar tv . f
+
+makeRequest :: YellerClient -> Backend -> LBS.ByteString -> IO HTTP.Request
+makeRequest c (Backend b) n = do
+  initReq <- HTTP.parseUrl $ T.unpack (b <> clientToken c)
   let req = initReq {
       HTTP.method = "POST"
     , HTTP.secure = True
-    , HTTP.requestBody = HTTP.RequestBodyLBS (JSON.encode n)
+    , HTTP.requestBody = HTTP.RequestBodyLBS n
     , HTTP.redirectCount = 0
+    , HTTP.requestHeaders = [("User-Agent", TE.encodeUtf8 $ clientVersion c)]
     --, HTTP.checkStatus = \_ _ _ -> Nothing
   }
   return req
 
-newtype ApplicationEnvironment = ApplicationEnvironment T.Text
+data ApplicationEnvironment = TestEnvironment | ApplicationEnvironment T.Text
 newtype ApplicationPackage = ApplicationPackage T.Text
+newtype YellerToken = YellerToken T.Text
 
-client :: ApplicationEnvironment -> ApplicationPackage -> IO YellerClient
-client (ApplicationEnvironment env) (ApplicationPackage package) = do
+client :: ApplicationEnvironment -> ApplicationPackage -> YellerToken -> IO YellerClient
+client TestEnvironment _ _ = return DisabledYellerClient
+client (ApplicationEnvironment env) (ApplicationPackage package) (YellerToken token) = do
   h <- fmap T.pack Network.BSD.getHostName
+  m <- HTTP.newManager TLS.tlsManagerSettings
+  backends <- STM.newTVarIO (map Backend defaultBackends)
   return YellerClient {
-      clientHost = h
+        clientToken = token
+      , clientHost = h
       , clientEnvironment = env
       , clientVersion = yellerVersion
       , clientApplicationPackage = package
+      , clientManager = m
+      , clientBackends = backends
     }
