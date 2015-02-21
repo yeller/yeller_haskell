@@ -30,6 +30,7 @@ library
         , network == 2.*
         , http-client == 0.4.*
         , http-client-tls == 0.2.*
+        , http-types == 0.8.*
   -- hs-source-dirs:
   default-language:    Haskell2010
 
@@ -48,6 +49,7 @@ executable yeller
         , network == 2.*
         , http-client == 0.4.*
         , http-client-tls == 0.2.*
+        , http-types == 0.8.*
   -- hs-source-dirs:
   default-language:    Haskell2010
 
@@ -65,3 +67,4 @@ Test-Suite test-yeller
         , network == 2.*
         , http-client == 0.4.*
         , http-client-tls == 0.2.*
+        , http-types == 0.8.*

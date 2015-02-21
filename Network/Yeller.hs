@@ -10,6 +10,7 @@ import qualified Data.Typeable
 import qualified Data.Aeson as JSON
 import qualified Network.BSD
 import qualified Network.HTTP.Client as HTTP
+import qualified Network.HTTP.Types as HTTPStatus
 import qualified Network.HTTP.Client.TLS as TLS
 import qualified Control.Concurrent.STM as STM
 import Control.Applicative((<$>))
@@ -73,7 +74,13 @@ data YellerClient = YellerClient {
   , clientApplicationPackage :: T.Text
   , clientManager :: HTTP.Manager
   , clientBackends :: STM.TVar [Backend]
+  , clientErrorHandler :: YellerClientErrorHandler
 } | DisabledYellerClient
+
+data YellerClientErrorHandler = YellerClientErrorHandler {
+    handleAuthenticationErrors :: HTTP.Response HTTP.BodyReader -> IO ()
+  , handleIOErrors :: Control.Exception.SomeException -> ErrorNotification JSON.Value -> IO ()
+}
 
 data ApplicationEnvironment = TestEnvironment | ApplicationEnvironment T.Text
 newtype ApplicationPackage = ApplicationPackage T.Text
@@ -85,6 +92,7 @@ data YellerClientSettings = YellerClientSettings {
   , clientSettingsEnvironment :: ApplicationEnvironment
   , clientSettingsApplicationPackage :: ApplicationPackage
   , clientSettingsBackends :: [Backend]
+  , clientSettingsErrorHandler :: YellerClientErrorHandler
 }
 
 defaultClientSettings :: YellerClientSettings
@@ -94,6 +102,13 @@ defaultClientSettings = YellerClientSettings {
   , clientSettingsEnvironment = ApplicationEnvironment "production"
   , clientSettingsApplicationPackage = ApplicationPackage ""
   , clientSettingsBackends = map Backend defaultBackends
+  , clientSettingsErrorHandler = defaultErrorHandler
+}
+
+defaultErrorHandler :: YellerClientErrorHandler
+defaultErrorHandler = YellerClientErrorHandler {
+  handleAuthenticationErrors = \_ -> error "failed to authenticate with the yeller servers"
+  , handleIOErrors = \x n -> print ("Error sending an exception to Yeller: " :: String, x, n)
 }
 
 bogusClientToken :: T.Text
@@ -160,19 +175,29 @@ sendError c e extra = do
   sendNotification c $ toError e extra c (filterInAppLines (clientApplicationPackage c) $ parseStackTrace stack)
 
 sendNotification :: JSON.ToJSON a => YellerClient -> ErrorNotification a -> IO ()
-sendNotification c n = sendNotificationWithRetry 0 c (JSON.encode n)
+sendNotification c n = sendNotificationWithRetry 0 c n (JSON.encode n)
 
-sendNotificationWithRetry :: Int -> YellerClient -> LBS.ByteString -> IO ()
-sendNotificationWithRetry currentRetryCount c encoded = do
+sendNotificationWithRetry :: JSON.ToJSON a => Int -> YellerClient -> ErrorNotification a -> LBS.ByteString -> IO ()
+sendNotificationWithRetry currentRetryCount c n encoded = do
   currentBackend <- cycleBackends c
   r <- makeRequest c currentBackend encoded
-  res <- Control.Exception.try $ HTTP.withResponse r (clientManager c) (\_  -> return ())
+  res <- Control.Exception.try $ HTTP.withResponse r (clientManager c) return
   case res of
-    (Left (err :: Control.Exception.SomeException)) -> if currentRetryCount > 5 then
-                                                        sendNotificationWithRetry (currentRetryCount + 1) c encoded
+    (Left (err :: Control.Exception.SomeException)) -> if currentRetryCount > 10 then
+                                                          sendNotificationWithRetry (currentRetryCount + 1) c n encoded
                                                         else
-                                                          print err
-    (Right _) -> return ()
+                                                          handleIOErrors (clientErrorHandler c) err (encodeCustomDataAsJSON n)
+    (Right httpResponse) -> handleNonExceptionalSendRequest httpResponse currentRetryCount c n encoded
+
+handleNonExceptionalSendRequest :: JSON.ToJSON a => HTTP.Response HTTP.BodyReader -> Int -> YellerClient -> ErrorNotification a -> LBS.ByteString -> IO ()
+handleNonExceptionalSendRequest res currentRetryCount c n encoded
+  | status == 401 = handleAuthenticationErrors (clientErrorHandler c) res
+  | status > 299 = sendNotificationWithRetry (currentRetryCount + 1) c n encoded
+  | otherwise = return ()
+  where status = HTTPStatus.statusCode (HTTP.responseStatus res)
+
+encodeCustomDataAsJSON :: JSON.ToJSON a => ErrorNotification a -> ErrorNotification JSON.Value
+encodeCustomDataAsJSON n = n { errorExtra = (errorExtra n) { errorCustomData = Just (M.fromList [("data", JSON.toJSON (errorCustomData (errorExtra n)))]) } }
 
 cycleBackends :: YellerClient -> IO Backend
 cycleBackends c = STM.atomically $ do
@@ -195,13 +220,13 @@ makeRequest c (Backend b) n = do
     , HTTP.requestBody = HTTP.RequestBodyLBS n
     , HTTP.redirectCount = 0
     , HTTP.requestHeaders = [("User-Agent", TE.encodeUtf8 $ clientVersion c)]
-    --, HTTP.checkStatus = \_ _ _ -> Nothing
+    , HTTP.checkStatus = \_ _ _ -> Nothing
   }
   return req
 
 client :: YellerClientSettings -> IO YellerClient
 client (YellerClientSettings {clientSettingsEnvironment=TestEnvironment}) = return DisabledYellerClient
-client (YellerClientSettings {clientSettingsEnvironment=(ApplicationEnvironment env), clientSettingsApplicationPackage=(ApplicationPackage package), clientSettingsToken=(YellerToken token)}) = do
+client c@(YellerClientSettings {clientSettingsEnvironment=(ApplicationEnvironment env), clientSettingsApplicationPackage=(ApplicationPackage package), clientSettingsToken=(YellerToken token)}) = do
   h <- fmap T.pack Network.BSD.getHostName
   m <- HTTP.newManager TLS.tlsManagerSettings
   backends <- STM.newTVarIO (map Backend defaultBackends)
@@ -213,4 +238,8 @@ client (YellerClientSettings {clientSettingsEnvironment=(ApplicationEnvironment 
       , clientApplicationPackage = package
       , clientManager = m
       , clientBackends = backends
+      , clientErrorHandler = clientSettingsErrorHandler c
     }
+
+shutdownClient :: YellerClient -> IO ()
+shutdownClient c = HTTP.closeManager (clientManager c)
