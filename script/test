@@ -3,6 +3,6 @@
 set -e
 
 #cabal build
-#cabal configure --enable-executable-profiling --enable-library-profiling
+#cabal configure --enable-executable-profiling --enable-library-profiling --enable-tests
 #dist/build/yeller/yeller
 echo ":main" | cabal repl Specs.hs
