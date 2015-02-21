@@ -98,7 +98,7 @@ manageNoLocationFilename t
   | otherwise = t
 
 parseStackTrace :: [String] -> [StackFrame]
-parseStackTrace = map parseStackLine
+parseStackTrace = filter ((/= "Network.Yeller.sendError") . stackFunction) . map parseStackLine
 
 sendError :: ToError e => YellerClient -> e -> ExtraErrorInfo -> IO ()
 sendError c e extra = do
