@@ -110,7 +110,7 @@ defaultClientSettings = YellerClientSettings {
 
 defaultErrorHandler :: YellerClientErrorHandler
 defaultErrorHandler = YellerClientErrorHandler {
-  handleAuthenticationErrors = \_ -> error "Failed to authenticate with the yeller servers. Check your api key is correct and try again."
+  handleAuthenticationErrors = \_ -> putStrLn "Failed to authenticate with the yeller servers. Check your api key is correct and try again."
   , handleIOErrors = \x n -> print ("Error sending an exception to Yeller: " :: String, x, n)
 }
 
