@@ -162,7 +162,7 @@ maybeOr (Just a) _ = a
 maybeOr Nothing a = a
 
 yellerVersion :: T.Text
-yellerVersion = T.pack "yeller-haskell: 0.1.0.1"
+yellerVersion = T.pack "yeller-haskell: 0.1.0.3"
 
 -- | An endpoint to send errors with. Must end with \"/\"
 -- sample:
