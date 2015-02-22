@@ -1,6 +1,8 @@
 {-# LANGUAGE OverloadedStrings #-}
 import Network.Yeller
 import Control.Exception
+import qualified Data.Map as M
+import qualified Data.Text as T
 
 foo1 :: [Integer]
 foo1 = foo2
@@ -52,6 +54,7 @@ catchAny = Control.Exception.catch
 
 main :: IO ()
 main = do
-  c <- client (ApplicationEnvironment "production")
-  _ <- catchAny (evaluate foo1) (\x -> print x >> sendError c x (ExtraErrorInfo Nothing Nothing Nothing) >> return [])
+  c <- client $ defaultClientSettings {clientSettingsToken = YellerToken "TOKEN"}
+  let custom = M.fromList [("data", [("a", "b")])] :: M.Map T.Text [(String, String)]
+  _ <- catchAny (evaluate foo1) (\x -> print x >> sendError c x (ExtraErrorInfo (Just "http://example.com") (Just custom) (Just "handler")) >> return [])
   putStrLn "done"
