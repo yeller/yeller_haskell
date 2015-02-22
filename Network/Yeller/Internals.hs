@@ -283,9 +283,9 @@ defaultBackends = [
   , "https://collector5.yellerapp.com/"
   ]
 
--- | A class for converting things into errors
+-- | A class for converting things into errors.
 -- | Means you can pass both exceptions, and any
--- | other error like values in your code
+-- | other error like values in your code.
 class ToError a where
   toError :: a -> ExtraErrorInfo b -> YellerClient -> [StackFrame] -> ErrorNotification b
 
@@ -333,7 +333,8 @@ filterInAppLines package = map (markInApp package)
 -- | Sends an error to Yeller's servers
 -- | needs a client, something that can be turned into an error (via ToError), and
 -- | extra error information (which describes additional information to be sent
--- | along with the error)
+-- | along with the error). See 'ExtraErrorInfo' for the extra info, and 'client' for
+-- | how to create a client.
 sendError :: (ToError e, JSON.ToJSON a) => YellerClient -> e -> ExtraErrorInfo a -> IO ()
 sendError DisabledYellerClient _ _ = return ()
 sendError c e extra = do
