@@ -110,7 +110,7 @@ defaultClientSettings = YellerClientSettings {
 
 defaultErrorHandler :: YellerClientErrorHandler
 defaultErrorHandler = YellerClientErrorHandler {
-  handleAuthenticationErrors = \_ -> error "failed to authenticate with the yeller servers"
+  handleAuthenticationErrors = \_ -> error "Failed to authenticate with the yeller servers. Check your api key is correct and try again."
   , handleIOErrors = \x n -> print ("Error sending an exception to Yeller: " :: String, x, n)
 }
 
@@ -194,7 +194,7 @@ sendNotificationWithRetry currentRetryCount c n encoded = do
 
 handleNonExceptionalSendRequest :: JSON.ToJSON a => HTTP.Response HTTP.BodyReader -> Int -> YellerClient -> ErrorNotification a -> LBS.ByteString -> IO ()
 handleNonExceptionalSendRequest res currentRetryCount c n encoded
-  | status == 401 = handleAuthenticationErrors (clientErrorHandler c) res
+  | status == 403 || status == 401 = handleAuthenticationErrors (clientErrorHandler c) res
   | status > 299 = sendNotificationWithRetry (currentRetryCount + 1) c n encoded
   | otherwise = return ()
   where status = HTTPStatus.statusCode (HTTP.responseStatus res)
