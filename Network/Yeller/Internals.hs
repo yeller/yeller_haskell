@@ -1,6 +1,7 @@
 {-# LANGUAGE OverloadedStrings, ScopedTypeVariables #-}
 module Network.Yeller.Internals where
 import qualified Data.Map as M
+import qualified Data.HashMap.Strict as HM
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
 import qualified Data.ByteString.Lazy as LBS
@@ -17,32 +18,99 @@ import qualified Control.Concurrent.STM as STM
 import Control.Applicative((<$>))
 import Data.Monoid((<>))
 
+-- | An error notification. This is what is sent to Yeller's servers
 data ErrorNotification a = ErrorNotification {
+    -- | The type of the error. E.g. SomeException, DivideByZero
     errorType :: T.Text
+
+    -- | The message of the exception
   , errorMessage :: T.Text
+
+    -- | The stacktrace of the error. Usually grabbed using 'GHC.Stack.whoCreated'
   , errorStackTrace :: [StackFrame]
+
+    -- | the host that this error occurred on
   , errorHost :: T.Text
+
+    -- | the application environment this error occurred in
   , errorEnvironment :: T.Text
+
+    -- | the version of the yeller client reporting the error
   , errorClientVersion :: T.Text
+
+    -- | see 'ExtraErrorInfo'
   , errorExtra :: ExtraErrorInfo a
 } deriving (Show, Eq)
 
+-- | A line of the stacktrace
 data StackFrame = StackFrame {
+    -- | The filename this line occurred in
     stackFilename :: T.Text
+
+    -- | The line number(s) this line occurred in
   , stackLineNumber :: T.Text
+
+    -- | the function this line occurred in
   , stackFunction :: T.Text
+
+    -- see 'StackOptions'
   , stackOptions :: StackOptions
 } deriving (Show, Eq)
 
+-- | Options to be associated with each
+-- | line in the stacktrace. Currently
+-- | only supports if the line is in
+-- | the application or not.
 data StackOptions = StackOptions {
   stackOptionsInApp :: Bool
 } deriving (Show, Eq)
 
+-- | Extra error information to be passed along with
+-- | an error. All fields are optional.
 data ExtraErrorInfo a = ExtraErrorInfo {
+    -- | If the error happened during a web request,
+    -- | the url that was hit during that request
     errorURL :: Maybe T.Text
+    -- | A map of data that has to conform to Aeson's
+    -- | ToJSON typeclass. Can be anything
+    -- | you want that helps you debug the error.
   , errorCustomData :: Maybe (M.Map T.Text a)
+
+    -- | what toplevel part of the application the
+    -- | request that caused the error came from
+    -- | e.g. web controller name, background job name
   , errorLocation :: Maybe T.Text
+
+    -- | which user the error happened from.
+    -- | Lets you see how many total users were affected by an error
+  , errorUser :: Maybe UserInfo
+
+    -- | which http request was happening when
+    -- | the error occurred
+  , errorHTTPRequest :: Maybe HTTPRequest
 } deriving (Show, Eq)
+
+-- | lets you attach which user the error happened with
+-- | which lets you count the total number of affected users
+data UserInfo = UserInfo {
+  -- | the user id of the affected user
+  userID :: Integer
+} deriving (Show, Eq)
+
+instance JSON.ToJSON UserInfo where
+  toJSON u = JSON.object ["id" JSON..= userID u]
+
+-- | lets you attach which http request was occurring when the
+-- | error happened
+-- | which lets you see the browser, if the request came from a spider
+-- | and so on
+data HTTPRequest = HTTPRequest {
+  -- | the user agent of the impacted http request
+  httpRequestUserAgent :: T.Text
+} deriving (Show, Eq)
+
+instance JSON.ToJSON HTTPRequest where
+  toJSON h = JSON.object ["user-agent" JSON..= httpRequestUserAgent h]
 
 instance JSON.ToJSON StackOptions where
   toJSON s = JSON.object ["in-app" JSON..= stackOptionsInApp s]
@@ -59,8 +127,32 @@ instance (JSON.ToJSON b) => JSON.ToJSON (ErrorNotification b) where
                           , "client-version" JSON..= errorClientVersion e
                           , "url" JSON..= errorURL ( errorExtra e)
                           , "location" JSON..= errorLocation ( errorExtra e)
-                          , "custom-data" JSON..= errorCustomData ( errorExtra e)
+                          , "custom-data" JSON..= makeJSONCustomData ( errorExtra e)
                           ]
+
+makeJSONCustomData :: JSON.ToJSON a => ExtraErrorInfo a -> JSON.Value
+makeJSONCustomData e = JSON.toJSON (maybeAddHTTPUserAgent e (maybeAddUser e withJSONVals))
+  where withJSONVals = M.map JSON.toJSON (maybeOr (errorCustomData e) M.empty)
+
+maybeAddUser :: ExtraErrorInfo a -> M.Map T.Text JSON.Value -> M.Map T.Text JSON.Value
+maybeAddUser (ExtraErrorInfo { errorUser =  Nothing } ) m = m
+maybeAddUser (ExtraErrorInfo { errorUser = (Just user) }) m =
+  case M.lookup "user" m of
+    Nothing -> M.insert "user" (JSON.toJSON user) m
+    (Just (JSON.Object u)) -> M.insert "user" (JSON.Object (HM.insert "id" (JSON.toJSON (userID user)) u)) m
+    (Just _)  -> m
+
+maybeAddHTTPUserAgent :: ExtraErrorInfo a -> M.Map T.Text JSON.Value -> M.Map T.Text JSON.Value
+maybeAddHTTPUserAgent (ExtraErrorInfo { errorHTTPRequest =  Nothing } ) m = m
+maybeAddHTTPUserAgent (ExtraErrorInfo { errorHTTPRequest = (Just http) }) m =
+  case M.lookup "http-request" m of
+    Nothing -> M.insert "http-request" (JSON.toJSON http) m
+    (Just (JSON.Object h)) -> M.insert "http-request" (JSON.Object (HM.insert "user-agent" (JSON.toJSON (httpRequestUserAgent http)) h)) m
+    (Just _)  -> m
+
+maybeOr :: Maybe a -> a -> a
+maybeOr (Just a) _ = a
+maybeOr Nothing a = a
 
 yellerVersion :: T.Text
 yellerVersion = T.pack "yeller-haskell: 0.1.0.0"

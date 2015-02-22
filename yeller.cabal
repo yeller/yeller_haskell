@@ -26,6 +26,7 @@ library
         , bytestring == 0.10.*
         , stm == 2.*
         , containers == 0.5.*
+        , unordered-containers == 0.2.*
         , aeson == 0.6.*
         , network == 2.*
         , http-client == 0.4.*
@@ -44,6 +45,7 @@ Test-Suite test-yeller
         , bytestring == 0.10.*
         , stm == 2.*
         , containers == 0.5.*
+        , unordered-containers == 0.2.*
         , aeson == 0.6.*
         , network == 2.*
         , http-client == 0.4.*

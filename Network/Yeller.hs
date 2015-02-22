@@ -4,6 +4,8 @@ module Network.Yeller
   , StackFrame (..)
   , StackOptions (..)
   , ExtraErrorInfo (..)
+  , HTTPRequest (..)
+  , UserInfo (..)
   , Backend (..)
   , YellerClient
   , YellerClientErrorHandler (..)
