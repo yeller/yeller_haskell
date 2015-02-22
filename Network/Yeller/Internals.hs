@@ -155,7 +155,7 @@ maybeOr (Just a) _ = a
 maybeOr Nothing a = a
 
 yellerVersion :: T.Text
-yellerVersion = T.pack "yeller-haskell: 0.1.0.0"
+yellerVersion = T.pack "yeller-haskell: 0.1.0.1"
 
 newtype Backend = Backend T.Text
 
