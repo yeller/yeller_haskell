@@ -1,22 +1,23 @@
 module Network.Yeller
   (
-    ErrorNotification (..)
-  , StackFrame (..)
-  , StackOptions (..)
-  , ExtraErrorInfo (..)
-  , HTTPRequest (..)
-  , UserInfo (..)
-  , Backend (..)
-  , YellerClient
-  , YellerClientErrorHandler (..)
+    sendError
+  , client
+  , defaultClientSettings
+  , YellerClientSettings (..)
   , ApplicationEnvironment (..)
   , ApplicationPackage (..)
   , YellerToken (..)
-  , YellerClientSettings (..)
-  , defaultClientSettings
-  , defaultErrorHandler
+  , ExtraErrorInfo (..)
+  , emptyExtraErrorInfo
+  , HTTPRequest (..)
+  , UserInfo (..)
+  , ErrorNotification (..)
+  , StackFrame (..)
+  , StackOptions (..)
   , ToError
-  , sendError
-  , client
+  , YellerClientErrorHandler (..)
+  , defaultErrorHandler
+  , Backend (..)
+  , YellerClient
   ) where
 import Network.Yeller.Internals

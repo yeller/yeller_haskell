@@ -29,16 +29,16 @@ data ErrorNotification a = ErrorNotification {
     -- | The stacktrace of the error. Usually grabbed using 'GHC.Stack.whoCreated'
   , errorStackTrace :: [StackFrame]
 
-    -- | the host that this error occurred on
+    -- | The host that this error occurred on
   , errorHost :: T.Text
 
-    -- | the application environment this error occurred in
+    -- | The application environment this error occurred in
   , errorEnvironment :: T.Text
 
-    -- | the version of the yeller client reporting the error
+    -- | The version of the yeller client reporting the error
   , errorClientVersion :: T.Text
 
-    -- | see 'ExtraErrorInfo'
+    -- | See 'ExtraErrorInfo'
   , errorExtra :: ExtraErrorInfo a
 } deriving (Show, Eq)
 
@@ -50,62 +50,69 @@ data StackFrame = StackFrame {
     -- | The line number(s) this line occurred in
   , stackLineNumber :: T.Text
 
-    -- | the function this line occurred in
+    -- | The function this line occurred in
   , stackFunction :: T.Text
 
-    -- see 'StackOptions'
+    -- See 'StackOptions'
   , stackOptions :: StackOptions
 } deriving (Show, Eq)
 
 -- | Options to be associated with each
--- | line in the stacktrace. Currently
--- | only supports if the line is in
--- | the application or not.
+-- line in the stacktrace. Currently
+-- only supports if the line is in
+-- the application or not.
 data StackOptions = StackOptions {
   stackOptionsInApp :: Bool
 } deriving (Show, Eq)
 
 -- | Extra error information to be passed along with
--- | an error. All fields are optional.
+-- an error. All fields are optional.
 data ExtraErrorInfo a = ExtraErrorInfo {
     -- | If the error happened during a web request,
-    -- | the url that was hit during that request
+    -- the url that was hit during that request
     errorURL :: Maybe T.Text
     -- | A map of data that has to conform to Aeson's
-    -- | ToJSON typeclass. Can be anything
-    -- | you want that helps you debug the error.
+    -- ToJSON typeclass. Can be anything
+    -- you want that helps you debug the error.
   , errorCustomData :: Maybe (M.Map T.Text a)
 
-    -- | what toplevel part of the application the
-    -- | request that caused the error came from
-    -- | e.g. web controller name, background job name
+    -- | What toplevel part of the application the
+    -- request that caused the error came from
+    -- e.g. web controller name, background job name
   , errorLocation :: Maybe T.Text
 
-    -- | which user the error happened from.
-    -- | Lets you see how many total users were affected by an error
+    -- | Which user the error happened from.
+    -- Lets you see how many total users were affected by an error
   , errorUser :: Maybe UserInfo
 
-    -- | which http request was happening when
-    -- | the error occurred
+    -- | Which http request was happening when
+    -- the error occurred
   , errorHTTPRequest :: Maybe HTTPRequest
 } deriving (Show, Eq)
 
--- | lets you attach which user the error happened with
--- | which lets you count the total number of affected users
+-- | Lets you attach which user the error happened with
+-- which lets you count the total number of affected users
 data UserInfo = UserInfo {
-  -- | the user id of the affected user
+  -- | The user id of the affected user
   userID :: Integer
 } deriving (Show, Eq)
 
 instance JSON.ToJSON UserInfo where
   toJSON u = JSON.object ["id" JSON..= userID u]
 
--- | lets you attach which http request was occurring when the
--- | error happened
--- | which lets you see the browser, if the request came from a spider
--- | and so on
+-- | Extra error info with all fields turned off.
+--
+-- Useful when getting started, but real apps should fill
+-- in as many fields as possible for better debugging context
+emptyExtraErrorInfo :: ExtraErrorInfo Int
+emptyExtraErrorInfo = ExtraErrorInfo Nothing Nothing Nothing Nothing Nothing
+
+-- | Lets you attach which http request was occurring when the
+-- error happened
+-- which lets you see the browser, if the request came from a spider
+-- and so on
 data HTTPRequest = HTTPRequest {
-  -- | the user agent of the impacted http request
+  -- | The user agent of the impacted http request
   httpRequestUserAgent :: T.Text
 } deriving (Show, Eq)
 
@@ -157,17 +164,25 @@ maybeOr Nothing a = a
 yellerVersion :: T.Text
 yellerVersion = T.pack "yeller-haskell: 0.1.0.1"
 
+-- | An endpoint to send errors with. Must end with \"/\"
+-- sample:
+--
+-- @
+-- Backend \"https://collector1.yellerapp.com\"
+-- @
 newtype Backend = Backend T.Text
 
 -- | A Yeller client.
--- | Build one with 'client' like so:
--- | client (defaultClientSettings { clientSettingsToken = YellerToken "YOUR_TOKEN_HERE" })
--- |
--- |
+-- Build one with 'client' like so:
+-- @
+-- client (defaultClientSettings { clientSettingsToken = YellerToken "YOUR_TOKEN_HERE" })
+-- @
+--
+--
 -- Used to keep persistent
--- | http connections alive, keep track of
--- | which endpoint to send to, and a bunch of
--- | data that's sent along with the error.
+-- http connections alive, keep track of
+-- which endpoint to send to, and a bunch of
+-- data that's sent along with the error.
 data YellerClient = YellerClient {
     -- | The token used to authenticate with Yeller's servers.
     clientToken :: T.Text
@@ -180,37 +195,42 @@ data YellerClient = YellerClient {
 
     -- | The version number of this client
   , clientVersion :: T.Text
+
     -- | The name of the application package that is using this client
   , clientApplicationPackage :: T.Text
 
     -- | The http manager for tracking open connections
   , clientManager :: HTTP.Manager
 
-    -- | the set of backends to use. The next backend that will
-    -- | be used is second in the list.
+    -- | The set of backends to use. The next backend that will
+    -- be used is second in the list.
   , clientBackends :: STM.TVar [Backend]
-    -- | the client error handler. See 'YellerClientErrorHandler'
+    -- | The client error handler. See 'YellerClientErrorHandler'
   , clientErrorHandler :: YellerClientErrorHandler
-    -- | the maximum number of retries
+    -- | The maximum number of retries
   , clientMaxRetries :: Int
 } | DisabledYellerClient
 
 -- | An error handler, for dealing with errors when sending errors to Yeller's servers
--- | 'defaultErrorHandler' just prints to stderr when receiving errors, but you
--- | might want to override that to make it go to your logging system of choice.
+-- 'defaultErrorHandler' just prints to stderr when receiving errors, but you
+-- might want to override that to make it go to your logging system of choice.
 data YellerClientErrorHandler = YellerClientErrorHandler {
-    -- | used when handling authentication (401, 403) failures from Yeller's servers.
-    -- | These errors are *not* retried like other ones.
+    -- | Used when handling authentication (401, 403) failures from Yeller's servers.
+    -- These errors are *not* retried like other ones.
     handleAuthenticationErrors :: HTTP.Response HTTP.BodyReader -> IO ()
-    -- | used when handling any errors that aren't authentication related.
-    -- | This function will only be called after 'clientMaxRetries' is
-    -- | exceeded.
+    -- | Used when handling any errors that aren't authentication related.
+    -- This function will only be called after 'clientMaxRetries' is
+    -- exceeded.
   , handleIOErrors :: Control.Exception.SomeException -> ErrorNotification JSON.Value -> IO ()
 }
 
--- | the Environment your client is running in. If set to 'TestEnvironment',
--- | then no errors will be reported (which you should do for development/testing)
-data ApplicationEnvironment = TestEnvironment | ApplicationEnvironment T.Text
+-- | The Environment your client is running in. If set to 'TestEnvironment',
+-- then no errors will be reported (which you should do for development/testing)
+data ApplicationEnvironment =
+  -- | Clients constructed with this environment don't send errors.
+  TestEnvironment |
+  -- | Any client in this kind of environment will report errors.
+  ApplicationEnvironment T.Text
 
 -- | The name of the package your application is in.
 newtype ApplicationPackage = ApplicationPackage T.Text
@@ -219,41 +239,45 @@ newtype ApplicationPackage = ApplicationPackage T.Text
 newtype YellerToken = YellerToken T.Text
 
 -- | Options you pass when creating a client, usually done like this:
--- | client (defaultClientSettings { clientSettingsToken = YellerToken "YOUR_TOKEN_HERE" })
+--
+-- @
+-- 'client' ('defaultClientSettings' { 'clientSettingsToken' = 'YellerToken' \"YOUR_TOKEN_HERE\" })
+-- @
 data YellerClientSettings = YellerClientSettings {
     -- | The api token used for authenticating with Yeller's servers
     clientSettingsToken :: YellerToken
 
     -- | (optional): the name of the server this client is running on
-    -- | if set to Nothing, 'client' will default it to 'Network.BSD.getHostName'
+    -- if set to 'Nothing', 'client' will default it to 'Network.BSD.getHostName'
   , clientSettingsHost :: Maybe T.Text
 
-    -- | the name of the environment the application is running in
-    -- | for example: production, test etc
-    -- | if set to TestEnvironment, the client will be disabled
+    -- | The name of the environment the application is running in
+    -- for example: production, test etc
+    -- if set to 'TestEnvironment', the client will be disabled
   , clientSettingsEnvironment :: ApplicationEnvironment
 
-    -- | the name of the application package, used to
-    -- | filter out noisy stacktrace lines by default in
-    -- | the UI. Lines from functions starting with this
-    -- | are marked as "in-app", others will only show
-    -- | up via a toggle in the UI.
+    -- | The name of the application package, used to
+    -- filter out noisy stacktrace lines by default in
+    -- the UI. Lines from functions starting with this
+    -- are marked as \"in-app\", others will only show
+    -- up via a toggle in the UI.
   , clientSettingsApplicationPackage :: ApplicationPackage
 
-    -- | a list of servers to contact. Weird things will
-    -- | probably happen if it's set to []
+    -- | A list of servers to contact. Weird things will
+    -- probably happen if it's set to []
   , clientSettingsBackends :: [Backend]
 
-    -- | used for handling errors when sending to Yeller's
-    -- | servers. See 'YellerClientErrorHandler' for more.
+    -- | Used for handling errors when sending to Yeller's
+    -- servers. See 'YellerClientErrorHandler' for more.
   , clientSettingsErrorHandler :: YellerClientErrorHandler
 
-    -- | the maximum number of times to retry sending to
-    -- | the servers before logging a failure
+    -- | The maximum number of times to retry sending to
+    -- the servers before logging a failure.
+    -- Weird things will probably happen if set to less than 1.
   , clientSettingsMaxRetries :: Int
 }
 
--- | the default client settings, used for constructing a client
+-- | The default client settings, used for constructing a client
 defaultClientSettings :: YellerClientSettings
 defaultClientSettings = YellerClientSettings {
     clientSettingsToken = YellerToken bogusClientToken
@@ -265,6 +289,8 @@ defaultClientSettings = YellerClientSettings {
   , clientSettingsMaxRetries = 10
 }
 
+-- | The default error handler, which logs errors when sending things to Yeller
+-- to stderr
 defaultErrorHandler :: YellerClientErrorHandler
 defaultErrorHandler = YellerClientErrorHandler {
   handleAuthenticationErrors = \_ -> IO.hPutStrLn stderr "Failed to authenticate with the yeller servers. Check your api key is correct and try again."
@@ -284,8 +310,8 @@ defaultBackends = [
   ]
 
 -- | A class for converting things into errors.
--- | Means you can pass both exceptions, and any
--- | other error like values in your code.
+-- Means you can pass both exceptions, and any
+-- other error like values in your code.
 class ToError a where
   toError :: a -> ExtraErrorInfo b -> YellerClient -> [StackFrame] -> ErrorNotification b
 
@@ -331,10 +357,16 @@ filterInAppLines :: T.Text -> [StackFrame] -> [StackFrame]
 filterInAppLines package = map (markInApp package)
 
 -- | Sends an error to Yeller's servers
--- | needs a client, something that can be turned into an error (via ToError), and
--- | extra error information (which describes additional information to be sent
--- | along with the error). See 'ExtraErrorInfo' for the extra info, and 'client' for
--- | how to create a client.
+-- needs a client, something that can be turned into an error (via ToError), and
+-- extra error information (which describes additional information to be sent
+-- along with the error). See 'ExtraErrorInfo' for the extra info, and 'client' for
+-- how to create a client.
+--
+-- Sample invocation:
+--
+-- @
+-- sendError yellerClient someError 'emptyExtraErrorInfo'
+-- @
 sendError :: (ToError e, JSON.ToJSON a) => YellerClient -> e -> ExtraErrorInfo a -> IO ()
 sendError DisabledYellerClient _ _ = return ()
 sendError c e extra = do
@@ -393,8 +425,11 @@ makeRequest c (Backend b) n = do
   return req
 
 -- | Initializes a Yeller client, given some client settings
--- | Call it like this with the default client settings:
--- | client (defaultClientSettings { clientSettingsToken = YellerToken "YOUR_TOKEN_HERE" })
+-- Call it like this with the default client settings:
+--
+-- @
+-- 'client' ('defaultClientSettings' { 'clientSettingsToken' = 'YellerToken' \"YOUR_TOKEN_HERE\" })
+-- @
 client :: YellerClientSettings -> IO YellerClient
 client (YellerClientSettings {clientSettingsEnvironment=TestEnvironment}) = return DisabledYellerClient
 client c@(YellerClientSettings {clientSettingsEnvironment=(ApplicationEnvironment env), clientSettingsApplicationPackage=(ApplicationPackage package), clientSettingsToken=(YellerToken token)}) = do
