@@ -75,6 +75,7 @@ data YellerClient = YellerClient {
   , clientManager :: HTTP.Manager
   , clientBackends :: STM.TVar [Backend]
   , clientErrorHandler :: YellerClientErrorHandler
+  , clientMaxRetries :: Int
 } | DisabledYellerClient
 
 data YellerClientErrorHandler = YellerClientErrorHandler {
@@ -93,6 +94,7 @@ data YellerClientSettings = YellerClientSettings {
   , clientSettingsApplicationPackage :: ApplicationPackage
   , clientSettingsBackends :: [Backend]
   , clientSettingsErrorHandler :: YellerClientErrorHandler
+  , clientSettingsMaxRetries :: Int
 }
 
 defaultClientSettings :: YellerClientSettings
@@ -103,6 +105,7 @@ defaultClientSettings = YellerClientSettings {
   , clientSettingsApplicationPackage = ApplicationPackage ""
   , clientSettingsBackends = map Backend defaultBackends
   , clientSettingsErrorHandler = defaultErrorHandler
+  , clientSettingsMaxRetries = 10
 }
 
 defaultErrorHandler :: YellerClientErrorHandler
@@ -183,7 +186,7 @@ sendNotificationWithRetry currentRetryCount c n encoded = do
   r <- makeRequest c currentBackend encoded
   res <- Control.Exception.try $ HTTP.withResponse r (clientManager c) return
   case res of
-    (Left (err :: Control.Exception.SomeException)) -> if currentRetryCount > 10 then
+    (Left (err :: Control.Exception.SomeException)) -> if currentRetryCount > clientMaxRetries c then
                                                           sendNotificationWithRetry (currentRetryCount + 1) c n encoded
                                                         else
                                                           handleIOErrors (clientErrorHandler c) err (encodeCustomDataAsJSON n)
@@ -239,6 +242,7 @@ client c@(YellerClientSettings {clientSettingsEnvironment=(ApplicationEnvironmen
       , clientManager = m
       , clientBackends = backends
       , clientErrorHandler = clientSettingsErrorHandler c
+      , clientMaxRetries = clientSettingsMaxRetries c
     }
 
 shutdownClient :: YellerClient -> IO ()
