@@ -6,7 +6,7 @@ version:             0.1.0.0
 synopsis:            A Yeller Client For Haskell
 -- description:
 homepage:            http://yellerapp.com
-license:             AllRightsReserved
+license:             MIT
 license-file:        LICENSE
 author:              Tom Crayford
 maintainer:          clients@yellerapp.com
