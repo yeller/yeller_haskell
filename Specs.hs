@@ -1,6 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 import Test.Hspec
-import Network.Yeller
+import Network.Yeller.Internals
 import qualified Data.Text as T
 
 main :: IO ()
