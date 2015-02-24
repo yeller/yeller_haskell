@@ -312,19 +312,18 @@ defaultBackends = [
 -- | A class for converting things into errors.
 -- Means you can pass both exceptions, and any
 -- other error like values in your code.
-class ToError a where
-  toError :: a -> ExtraErrorInfo b -> YellerClient -> [StackFrame] -> ErrorNotification b
+class (Data.Typeable.Typeable a, Show a) => ToError a where
+  toError :: a -> ErrorNotification b -> ErrorNotification b
 
 instance ToError Control.Exception.SomeException where
-  toError e extra c stack = ErrorNotification {
-        errorType = T.pack . show $ Data.Typeable.typeOf e
-      , errorMessage = T.pack $ show e
-      , errorStackTrace = stack
-      , errorHost = clientHost c
-      , errorEnvironment = clientEnvironment c
-      , errorClientVersion = clientVersion c
-      , errorExtra = extra
-    }
+  toError = defaultToError
+
+defaultToError :: (Data.Typeable.Typeable e, Show e) => e -> ErrorNotification b -> ErrorNotification b
+defaultToError e current = current {
+                               errorType = T.pack . show $ Data.Typeable.typeOf e
+                             , errorMessage = T.pack $ show e
+                           }
+
 
 parseStackLine :: String -> StackFrame
 parseStackLine x = StackFrame {
@@ -372,7 +371,16 @@ sendError DisabledYellerClient _ _ = return ()
 sendError c e extra = do
   let forced = seq e e
   stack <- GHC.Stack.whoCreated forced
-  sendNotification c $ toError e extra c (filterInAppLines (clientApplicationPackage c) $ parseStackTrace stack)
+  let existing = ErrorNotification {
+        errorType = T.pack . show $ Data.Typeable.typeOf e
+      , errorMessage = T.pack $ show e
+      , errorStackTrace = filterInAppLines (clientApplicationPackage c) (parseStackTrace stack)
+      , errorHost = clientHost c
+      , errorEnvironment = clientEnvironment c
+      , errorClientVersion = clientVersion c
+      , errorExtra = extra
+      }
+  sendNotification c $ toError e existing
 
 sendNotification :: JSON.ToJSON a => YellerClient -> ErrorNotification a -> IO ()
 sendNotification c n = sendNotificationWithRetry 0 c n (JSON.encode n)
