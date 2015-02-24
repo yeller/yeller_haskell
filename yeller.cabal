@@ -2,7 +2,7 @@
 -- documentation, see http://haskell.org/cabal/users-guide/
 
 name:                yeller
-version:             0.1.0.3
+version:             0.1.0.4
 synopsis:            A Yeller Client For Haskell
 -- description:
 homepage:            http://yellerapp.com
